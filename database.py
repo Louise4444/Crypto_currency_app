@@ -97,7 +97,7 @@ def add_crypto(nom_crypto, prix):
         # Vérifier si la cryptomonnaie existe déjà
         cursor.execute("SELECT id FROM Cryptomonnaies WHERE cryptomonnaie = ?", (nom_crypto,))
         if cursor.fetchone():
-            print(f"⚠️ La cryptomonnaie {nom_crypto} existe déjà dans la base.")
+            print(f"La cryptomonnaie {nom_crypto} existe déjà dans la base.")
             return
 
         # Ajouter la cryptomonnaie
@@ -199,7 +199,7 @@ def delete_alerte(crypto,seuil):
         cursor.execute("SELECT id FROM Alertes WHERE crypto_id = ? AND seuil = ?",
                        (crypto, seuil))
         if cursor.fetchone() is None:
-            print(f"⚠️ Aucune alerte trouvée pour {crypto}.")
+            print(f"Aucune alerte trouvée pour {crypto}.")
             return
 
         # Supprimer l'alerte
@@ -293,7 +293,7 @@ def verifier_alertes(root):
     for (cryptomonnaie, prix, seuil) in cryptos_dans_alertes:
         comparaison_prix_seuil(cryptomonnaie, float(prix), float(seuil))
 
-    # 🔄 Relancer la vérification toutes les 60 secondes
+    #Relancer la vérification toutes les 60 secondes
     root.after(60000, lambda: verifier_alertes(root))
 
     
@@ -340,7 +340,7 @@ def delete_notification(crypto):
         # Vérifier si la notification existe
         cursor.execute("SELECT id FROM Notifications WHERE crypto = ?", (crypto,))
         if cursor.fetchone() is None:
-            print(f"⚠️ Aucune notification trouvée pour {crypto}.")
+            print(f"Aucune notification trouvée pour {crypto}.")
             return
 
         # Supprimer la notification
