@@ -2,9 +2,6 @@
 import requests
 from  classuseful import Crypto
 
-
-
-# Remplace par ta clé API depuis CoinAPI.io
 api_key = '5aa6d3a9-cf98-410a-9e26-11c089a24aaf'
 
 # Fonction pour récupérer les informations de prix
