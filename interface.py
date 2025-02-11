@@ -16,70 +16,102 @@ class CryptoApp:
         self.clear_screen()
 
         # Bienvenue
-        welcome_label = tk.Label(self.root, text="Welcom to the cryptocurrency app", font=("Arial", 16, "bold"))
-        welcome_label.pack(pady=20)
+        welcome_label = tk.Label(self.root, text="Welcome to the cryptocurrency app", font=("Arial", 16, "bold"))
+        welcome_label.grid(row=0, column=0, columnspan=2, pady=20, padx=20)
 
-        signup_with_email_button = tk.Button(self.root, text="Signup / S'inscrire", command=self.create_signup_screen,bg="blue", fg="white", font=("Arial", 12))
-        signup_with_email_button.pack(pady=10, fill=tk.X, padx=50)
+        # Bouton d'inscription
+        signup_with_email_button = tk.Button(self.root, text="Signup / S'inscrire", 
+                                            command=self.create_signup_screen, bg="blue", fg="white", font=("Arial", 12))
+        signup_with_email_button.grid(row=1, column=0, columnspan=2, pady=10, padx=50, sticky="ew")
 
-        login_button = tk.Button(self.root, text="Login / Se connecter", command=self.create_login_screen, bg="green", fg="white", font=("Arial", 12))
-        login_button.pack(pady=10, fill=tk.X, padx=50)
+        # Bouton de connexion
+        login_button = tk.Button(self.root, text="Login / Se connecter", 
+                                command=self.create_login_screen, bg="green", fg="white", font=("Arial", 12))
+        login_button.grid(row=2, column=0, columnspan=2, pady=10, padx=50, sticky="ew")
+
+        # Ajustement des colonnes pour occuper tout l'espace
+        self.root.grid_columnconfigure(0, weight=1)
+        self.root.grid_columnconfigure(1, weight=1)
+
 
     def create_login_screen(self):
         self.clear_screen()
 
+        # Titre de la page
         login_label = tk.Label(self.root, text="Connexion", font=("Arial", 16, "bold"))
-        login_label.pack(pady=20)
+        login_label.grid(row=0, column=0, columnspan=2, pady=20, padx=20)
 
+        # Label Email
         email_label = tk.Label(self.root, text="Email:")
-        email_label.pack(pady=5)
+        email_label.grid(row=1, column=0, sticky="e", padx=10, pady=5)
+        
+        # Champ de saisie Email
         self.email_entry = tk.Entry(self.root)
-        self.email_entry.pack(pady=5, fill=tk.X, padx=50)
+        self.email_entry.grid(row=1, column=1, pady=5, padx=10, sticky="ew")
 
+        # Label Mot de passe
         password_label = tk.Label(self.root, text="Password / Mot de Passe:")
-        password_label.pack(pady=5)
+        password_label.grid(row=2, column=0, sticky="e", padx=10, pady=5)
+        
+        # Champ de saisie Mot de passe
         self.password_entry = tk.Entry(self.root, show="*")
-        self.password_entry.pack(pady=5, fill=tk.X, padx=50)
+        self.password_entry.grid(row=2, column=1, pady=5, padx=10, sticky="ew")
 
+        # Bouton de connexion
         login_button = tk.Button(self.root, text="Login / Se connecter", command=self.login, bg="green", fg="white")
-        login_button.pack(pady=10, fill=tk.X, padx=50)
+        login_button.grid(row=3, column=0, columnspan=2, pady=10, padx=50, sticky="ew")
 
-        # Bouton Retour bien visible
+        # Bouton Retour
         back_button = tk.Button(self.root, text="Back / Retour", command=self.create_welcome_screen)
-        back_button.pack(pady=10, fill=tk.X, padx=50)
+        back_button.grid(row=4, column=0, columnspan=2, pady=10, padx=50, sticky="ew")
+
+        # Ajustement des colonnes pour une meilleure répartition
+        self.root.grid_columnconfigure(0, weight=1)
+        self.root.grid_columnconfigure(1, weight=2)
+
         
     def create_signup_screen(self):
         self.clear_screen()
 
         # Titre d'inscription
         signup_label = tk.Label(self.root, text="Registration / Inscription", font=("Arial", 16, "bold"))
-        signup_label.pack(pady=20)
-        
-        #Entrée pour pseudo
-        pseudo_label = tk.Label(self.root, text="username / nom d'utilisateur:")
-        pseudo_label.pack(pady=5)
+        signup_label.grid(row=0, column=0, columnspan=2, pady=20, padx=20)
+
+        # Label Pseudo
+        pseudo_label = tk.Label(self.root, text="Username / Nom d'utilisateur:")
+        pseudo_label.grid(row=1, column=0, sticky="e", padx=10, pady=5)
+
+        # Champ de saisie Pseudo
         self.username_entry = tk.Entry(self.root)
-        self.username_entry.pack(pady=5, fill=tk.X, padx=50)
-        
-        # Entrée pour email
+        self.username_entry.grid(row=1, column=1, pady=5, padx=10, sticky="ew")
+
+        # Label Email
         email_label = tk.Label(self.root, text="Email:")
-        email_label.pack(pady=5)
+        email_label.grid(row=2, column=0, sticky="e", padx=10, pady=5)
+
+        # Champ de saisie Email
         self.email_entry = tk.Entry(self.root)
-        self.email_entry.pack(pady=5, fill=tk.X, padx=50)
-        
-        # Entrée pour mot de passe
+        self.email_entry.grid(row=2, column=1, pady=5, padx=10, sticky="ew")
+
+        # Label Mot de passe
         password_label = tk.Label(self.root, text="Password / Mot de Passe:")
-        password_label.pack(pady=5)
+        password_label.grid(row=3, column=0, sticky="e", padx=10, pady=5)
+
+        # Champ de saisie Mot de passe
         self.password_entry = tk.Entry(self.root, show="*")
-        self.password_entry.pack(pady=5, fill=tk.X, padx=50)
+        self.password_entry.grid(row=3, column=1, pady=5, padx=10, sticky="ew")
 
         # Bouton d'inscription
         signup_button = tk.Button(self.root, text="Sign up / S'inscrire", command=self.signup_with_email, bg="blue", fg="white")
-        signup_button.pack(pady=10)
+        signup_button.grid(row=4, column=0, columnspan=2, pady=10, padx=50, sticky="ew")
 
-        # Bouton de retour à l'écran d'accueil
+        # Bouton Retour
         back_button = tk.Button(self.root, text="Back / Retour", command=self.create_welcome_screen)
-        back_button.pack(pady=10)
+        back_button.grid(row=5, column=0, columnspan=2, pady=10, padx=50, sticky="ew")
+
+        # Ajustement des colonnes pour une meilleure répartition
+        self.root.grid_columnconfigure(0, weight=1)
+        self.root.grid_columnconfigure(1, weight=2)
 
 
     def login(self):
