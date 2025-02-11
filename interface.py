@@ -287,11 +287,6 @@ if __name__ == "__main__":
     app = CryptoApp(root)
     app.send_notification(root)
 
-
-
-    # Lancement du processus de mise à jour sans bloquer l'UI
-    # root.after(5000, lambda: verifier_alertes(root))  # Passer root en argument
-
     root.mainloop()
 
 
