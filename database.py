@@ -1,75 +1,70 @@
-from api import *
-from datetime import datetime
+from api import supported_crypto, get_info
 import bcrypt
+import sqlite3
+
 
 
 def init_db():
     connection = sqlite3.connect("crypto_app.db")
     cursor = connection.cursor()
     
-    # Créer la table users
+    #user_table
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS users (
+        CREATE TABLE IF NOT EXISTS Users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username STRING NOT NULL,
             email TEXT UNIQUE NOT NULL,
             password TEXT NOT NULL
         )
     """)
 
-    # Créer la table Cryptomonnaies
+    #Cryptomonnaie_table
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS Cryptomonnaies (
+        CREATE TABLE IF NOT EXISTS Cryptocurrency (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             cryptomonnaie TEXT UNIQUE NOT NULL,
-            prix REAL NOT NULL
+            price REAL NOT NULL
         )
     """)
 
-    # Créer la table Alertes
+    # Alerts_table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS Alertes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
             crypto_id INTEGER NOT NULL,
             seuil REAL NOT NULL,
-            FOREIGN KEY (crypto_id) REFERENCES Cryptomonnaies(id) ON DELETE CASCADE
+            alert_type TEXT NOT NULL,
+            FOREIGN KEY (crypto_id) REFERENCES Cryptocurrency(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES Users(id) ON DELETE CASCADE
         )
     """)
 
-    # Créer la table Notifications
+    #history_table
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS Notifications (
+        CREATE TABLE IF NOT EXISTS HistoriqueNotifications (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             crypto_id INTEGER NOT NULL,
-            type_alerte TEXT NOT NULL, 
-            FOREIGN KEY (crypto_id) REFERENCES Cryptomonnaies(id) ON DELETE CASCADE
-        )
-    """)
-    
-    #créer la table pour suivre le dernier statut de chaque cryptomonnaie par rapport au seuil
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS DernieresNotifications (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            crypto_id INTEGER NOT NULL UNIQUE, 
-            dernier_statut TEXT NOT NULL CHECK(dernier_statut IN ('au-dessus', 'en-dessous')),
-            date_notif TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (crypto_id) REFERENCES Cryptomonnaies(id) ON DELETE CASCADE
+            timestamp TEXT NOT NULL,  
+            FOREIGN KEY (crypto_id) REFERENCES Cryptocurrency(id) ON DELETE CASCADE
         );
     """)
+
     connection.commit()
     connection.close()
 
    
 #/---------------------------/
-#      table users
+#      table Users
 #/---------------------------/   
-    
 
-def add_user(email, password):
+def add_user(username, email, password):
     hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
     connection = sqlite3.connect("crypto_app.db")
     cursor = connection.cursor()
     try:
-        cursor.execute("INSERT INTO users (email, password) VALUES (?, ?)", (email, hashed_password))
+        cursor.execute("INSERT INTO Users(username, email, password) VALUES (?, ?, ?)", 
+                       (username, email, hashed_password))
         connection.commit()
     finally:
         connection.close()
@@ -77,7 +72,7 @@ def add_user(email, password):
 def get_user(email):
     connection = sqlite3.connect("crypto_app.db")
     cursor = connection.cursor()
-    cursor.execute("SELECT * FROM users WHERE email = ?", (email,))
+    cursor.execute("SELECT * FROM Users WHERE email = ?", (email,))
     user = cursor.fetchone()
     connection.close()
     return user
@@ -86,7 +81,7 @@ def get_user(email):
 #      table Crypto 
 #/---------------------------/
 
-def add_crypto(nom_crypto, prix):
+def add_crypto(nom_crypto, price):
     """
     Ajoute une nouvelle cryptomonnaie dans la base de données si elle n'existe pas déjà.
     """
@@ -95,19 +90,20 @@ def add_crypto(nom_crypto, prix):
         cursor = connection.cursor()
 
         # Vérifier si la cryptomonnaie existe déjà
-        cursor.execute("SELECT id FROM Cryptomonnaies WHERE cryptomonnaie = ?", (nom_crypto,))
+        cursor.execute("SELECT id FROM Cryptocurrency WHERE cryptomonnaie = ?", (nom_crypto,))
         if cursor.fetchone():
             print(f"La cryptomonnaie {nom_crypto} existe déjà dans la base.")
+            connection.close()
             return
 
         # Ajouter la cryptomonnaie
         cursor.execute("""
-            INSERT INTO Cryptomonnaies (cryptomonnaie, prix)
+            INSERT INTO Cryptocurrency (cryptomonnaie, price)
             VALUES (?, ?)
-        """, (nom_crypto, prix))
+        """, (nom_crypto, price))
 
         connection.commit()
-        print(f" {nom_crypto} ajoutée avec un prix de {prix}.")
+        print(f"{nom_crypto} ajoutée avec un prix de {price}.")
 
     except sqlite3.Error as e:
         print(f"Erreur lors de l'ajout de {nom_crypto} : {e}")
@@ -115,277 +111,582 @@ def add_crypto(nom_crypto, prix):
     finally:
         connection.close()
 
+def delete_crypto(nom_crypto):
+    """
+    Supprime une cryptomonnaie de la base de données.
+    """
+    connection = sqlite3.connect("crypto_app.db")
+    cursor = connection.cursor()
+    cursor.execute("DELETE FROM Cryptocurrency WHERE cryptomonnaie = ?", (nom_crypto,))
+    connection.commit()
+    connection.close()
+    print(f"{nom_crypto} supprimée de la base.")
+    
+    
+def collect_crypto_list():
+    """Récupère la liste des noms des Cryptocurrency depuis la base de données."""
+    try:
+        with sqlite3.connect("crypto_app.db") as connection:
+            cursor = connection.cursor()
+            cursor.execute("SELECT cryptomonnaie FROM Cryptocurrency")
+            return [nom for (nom,) in cursor.fetchall()]
+    except sqlite3.Error as e:
+        print(f"Erreur lors de la récupération des Cryptocurrency : {e}")
+        return []
+    finally:
+        connection.close()    
+
 def update_crypto():
     """
-    Met à jour les prix des cryptos existantes et ajoute celles qui ne sont pas encore dans la base.
+    Met à jour la base de données des cryptos :
+    - Ajoute celles qui n'existent pas encore.
+    - Met à jour le prix des cryptos existantes.
+    - Supprime celles qui ne figurent plus dans l'API.
     """
     connection = sqlite3.connect("crypto_app.db")
     cursor = connection.cursor()
 
     # Récupérer toutes les cryptos enregistrées dans la base
-    cursor.execute("SELECT cryptomonnaie, prix FROM Cryptomonnaies")
-    cryptos_db = {nom: prix for nom, prix in cursor.fetchall()}  # Dictionnaire {nom_crypto: prix}
+    cursor.execute("SELECT cryptomonnaie FROM Cryptocurrency")
+    cryptos_db = {nom for nom, in cursor.fetchall()}  # Set des cryptos en base
 
-    # Récupérer la liste des cryptos que l'API prend en charge
-    liste_cryptos_api = ['OKCOINUSD_SPOT_BTC_USD', 'COINBASE_SPOT_BTC_USD']
-
-    for nom_crypto in liste_cryptos_api:
-        
-        crypto_api =get_info(nom_crypto)  # Retourne un objet Crypto(nom, prix)
+    # Cryptos à ajouter
+    for nom_crypto in supported_crypto:
+        crypto_api = get_info(nom_crypto)  # Objet Crypto(nom, price)
 
         if nom_crypto in cryptos_db:
-            prix_db = cryptos_db[nom_crypto]
+            # Mettre à jour le prix si nécessaire
+            cursor.execute("SELECT price FROM Cryptocurrency WHERE cryptomonnaie = ?", (nom_crypto,))
+            price_db = cursor.fetchone()[0]
 
-            # Vérifier si le prix a changé
-            if crypto_api.prix != prix_db:
-
-                cursor.execute("""
-                    UPDATE Cryptomonnaies
-                    SET prix = ?
-                    WHERE cryptomonnaie = ?
-                """, (crypto_api.prix, nom_crypto))
+            if crypto_api and crypto_api.price != price_db:
+                cursor.execute("UPDATE Cryptocurrency SET price = ? WHERE cryptomonnaie = ?", (crypto_api.price, nom_crypto))
+                print(f"{nom_crypto} mis à jour avec un prix de {crypto_api.price}.")
         else:
-            
-            # Ajouter la nouvelle crypto à la base
-            if crypto_api is not None:
-                add_crypto(nom_crypto, crypto_api.prix)
-            else:
-                print(f"Erreur : Impossible de récupérer les données pour {nom_crypto}")
-
-
+            # Ajouter la nouvelle crypto
+            if crypto_api:
+                add_crypto(nom_crypto, crypto_api.price)
     connection.commit()
     connection.close()
     
+    # Cryptos à supprimer
+    cryptos_to_delete = cryptos_db - set(supported_crypto)
+    for crypto in cryptos_to_delete:
+        delete_crypto(crypto)
     
-def delete_crypto(monnaie, seuil):
+    print("Mise à jour terminée.")
+
+
+from api import supported_crypto, get_info
+import bcrypt
+import sqlite3
+
+
+
+def init_db():
     connection = sqlite3.connect("crypto_app.db")
     cursor = connection.cursor()
-    cursor.execute("DELETE FROM crypto WHERE monnaie = ? AND seuil = ?", (monnaie, seuil))
+    
+    #user_table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS Users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username STRING NOT NULL,
+            email TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL
+        )
+    """)
+
+    #Cryptomonnaie_table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS Cryptocurrency (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            cryptomonnaie TEXT UNIQUE NOT NULL,
+            price REAL NOT NULL
+        )
+    """)
+
+    # Alerts_table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS Alertes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            crypto_id INTEGER NOT NULL,
+            seuil REAL NOT NULL,
+            alert_type TEXT NOT NULL,
+            FOREIGN KEY (crypto_id) REFERENCES Cryptocurrency(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES Users(id) ON DELETE CASCADE
+        )
+    """)
+
+    #history_table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS HistoriqueNotifications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            crypto_id INTEGER NOT NULL,
+            timestamp TEXT NOT NULL,  
+            FOREIGN KEY (crypto_id) REFERENCES Cryptocurrency(id) ON DELETE CASCADE
+        );
+    """)
+
     connection.commit()
     connection.close()
+
+   
+#/---------------------------/
+#      table Users
+#/---------------------------/   
+
+def add_user(username, email, password):
+    hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
+    connection = sqlite3.connect("crypto_app.db")
+    cursor = connection.cursor()
+    try:
+        cursor.execute("INSERT INTO Users(username, email, password) VALUES (?, ?, ?)", 
+                       (username, email, hashed_password))
+        connection.commit()
+    finally:
+        connection.close()
+
+def get_user(email):
+    connection = sqlite3.connect("crypto_app.db")
+    cursor = connection.cursor()
+    cursor.execute("SELECT * FROM Users WHERE email = ?", (email,))
+    user = cursor.fetchone()
+    connection.close()
+    return user
+    
+#/---------------------------/
+#      table Crypto 
+#/---------------------------/
+
+def add_crypto(nom_crypto, price):
+    """
+    Ajoute une nouvelle cryptomonnaie dans la base de données si elle n'existe pas déjà.
+    """
+    try:
+        connection = sqlite3.connect("crypto_app.db")
+        cursor = connection.cursor()
+
+        # Vérifier si la cryptomonnaie existe déjà
+        cursor.execute("SELECT id FROM Cryptocurrency WHERE cryptomonnaie = ?", (nom_crypto,))
+        if cursor.fetchone():
+            print(f"La cryptomonnaie {nom_crypto} existe déjà dans la base.")
+            connection.close()
+            return
+
+        # Ajouter la cryptomonnaie
+        cursor.execute("""
+            INSERT INTO Cryptocurrency (cryptomonnaie, price)
+            VALUES (?, ?)
+        """, (nom_crypto, price))
+
+        connection.commit()
+        print(f"{nom_crypto} ajoutée avec un prix de {price}.")
+
+    except sqlite3.Error as e:
+        print(f"Erreur lors de l'ajout de {nom_crypto} : {e}")
+    
+    finally:
+        connection.close()
+
+def delete_crypto(nom_crypto):
+    """
+    Supprime une cryptomonnaie de la base de données.
+    """
+    connection = sqlite3.connect("crypto_app.db")
+    cursor = connection.cursor()
+    cursor.execute("DELETE FROM Cryptocurrency WHERE cryptomonnaie = ?", (nom_crypto,))
+    connection.commit()
+    connection.close()
+    print(f"{nom_crypto} supprimée de la base.")
+    
+    
+def collect_crypto_list():
+    """Récupère la liste des noms des Cryptocurrency depuis la base de données."""
+    try:
+        with sqlite3.connect("crypto_app.db") as connection:
+            cursor = connection.cursor()
+            cursor.execute("SELECT cryptomonnaie FROM Cryptocurrency")
+            return [nom for (nom,) in cursor.fetchall()]
+    except sqlite3.Error as e:
+        print(f"Erreur lors de la récupération des Cryptocurrency : {e}")
+        return []
+    finally:
+        connection.close()    
+
+def update_crypto():
+    """
+    Met à jour la base de données des cryptos :
+    - Ajoute celles qui n'existent pas encore.
+    - Met à jour le prix des cryptos existantes.
+    - Supprime celles qui ne figurent plus dans l'API.
+    """
+    connection = sqlite3.connect("crypto_app.db")
+    cursor = connection.cursor()
+
+    # Récupérer toutes les cryptos enregistrées dans la base
+    cursor.execute("SELECT cryptomonnaie FROM Cryptocurrency")
+    cryptos_db = {nom for nom, in cursor.fetchall()}  # Set des cryptos en base
+
+    # Cryptos à ajouter
+    for nom_crypto in supported_crypto:
+        crypto_api = get_info(nom_crypto)  # Objet Crypto(nom, price)
+
+        if nom_crypto in cryptos_db:
+            # Mettre à jour le prix si nécessaire
+            cursor.execute("SELECT price FROM Cryptocurrency WHERE cryptomonnaie = ?", (nom_crypto,))
+            price_db = cursor.fetchone()[0]
+
+            if crypto_api and crypto_api.price != price_db:
+                cursor.execute("UPDATE Cryptocurrency SET price = ? WHERE cryptomonnaie = ?", (crypto_api.price, nom_crypto))
+                print(f"{nom_crypto} mis à jour avec un prix de {crypto_api.price}.")
+        else:
+            # Ajouter la nouvelle crypto
+            if crypto_api:
+                add_crypto(nom_crypto, crypto_api.price)
+    connection.commit()
+    connection.close()
+    
+    # Cryptos à supprimer
+    cryptos_to_delete = cryptos_db - set(supported_crypto)
+    for crypto in cryptos_to_delete:
+        delete_crypto(crypto)
+    
+    print("Mise à jour terminée.")
+
+
+
+
     
 #/---------------------------/
 #      table Alerte
-#/-------------------- Assurer que chaque crypto_id est unique---------/
+#/-----------------------------/
       
-def add_alerte(crypto, seuil):
-    
-        connection = sqlite3.connect("crypto_app.db")
-        cursor = connection.cursor()
 
-        #obtenir id crytomonnaie
-        cursor.execute("SELECT id FROM Cryptomonnaies WHERE cryptomonnaie = ?", (crypto,))
-        crypto_id = cursor.fetchone()
-
-        # Vérifier si l'alerte existe déjà pour cette cryptomonnaie et seuil
-        cursor.execute("SELECT id FROM Alertes WHERE crypto_id = ? AND seuil = ?", (crypto_id[0], seuil))
-        if cursor.fetchone():
-            return 
-
-        # Ajouter l'alerte
-        cursor.execute("INSERT INTO Alertes (crypto_id, seuil) VALUES (?, ?)", (crypto_id[0], seuil))
-        connection.commit()
-        print(f" Alerte ajoutée pour {crypto} au seuil {seuil}.")
-
-        connection.close()
-
-        
-def delete_alerte(crypto,seuil):
+def add_alerte(user_id, crypto, seuil, alert_type):
+    """
+    Ajoute une alerte pour une cryptomonnaie donnée.
+    """
     try:
         connection = sqlite3.connect("crypto_app.db")
         cursor = connection.cursor()
 
+        # Obtenir l'ID de la cryptomonnaie
+        cursor.execute("SELECT id FROM Cryptocurrency WHERE cryptomonnaie = ?", (crypto,))
+        crypto_id = cursor.fetchone()
+
+        if not crypto_id:
+            print(f"La cryptomonnaie {crypto} n'existe pas dans la base.")
+            return 1
+
+        crypto_id = crypto_id[0]
+
+        # Vérifier si l'alerte existe déjà
+        cursor.execute("""
+            SELECT id FROM Alertes 
+            WHERE user_id = ? AND crypto_id = ? AND seuil = ? AND alert_type = ?
+        """, (user_id, crypto_id, seuil, alert_type))
+
+        if cursor.fetchone():
+            print(f"Une alerte pour {crypto} au seuil {seuil} existe déjà.")
+            return 2
+
+        # Ajouter l'alerte
+        cursor.execute("""
+            INSERT INTO Alertes (user_id, crypto_id, seuil, alert_type) 
+            VALUES (?, ?, ?, ?)
+        """, (user_id, crypto_id, seuil, alert_type))
+
+        connection.commit()
+        print(f"Alerte ajoutée pour {crypto} au seuil {seuil}.")
+        return 0
+
+    except sqlite3.Error as e:
+        print(f"Erreur lors de l'ajout de l'alerte : {e}")
+        return 3
+
+    finally:
+        connection.close()
+
+
+def delete_alerte(user_id, crypto, seuil,alert_type):
+    """
+    Supprime une alerte spécifique d'un utilisateur pour une cryptomonnaie donnée.
+    """
+    try:
+        connection = sqlite3.connect("crypto_app.db")
+        cursor = connection.cursor()
+
+        # Obtenir l'ID de la cryptomonnaie
+        cursor.execute("SELECT id FROM Cryptocurrency WHERE cryptomonnaie = ?", (crypto,))
+        crypto_id = cursor.fetchone()
+
+        if not crypto_id:
+            print(f"La cryptomonnaie {crypto} n'existe pas dans la base.")
+            return
+
+        crypto_id = crypto_id[0]
+
         # Vérifier si l'alerte existe
-        cursor.execute("SELECT id FROM Alertes WHERE crypto_id = ? AND seuil = ?",
-                       (crypto, seuil))
+        cursor.execute("""
+            SELECT id FROM Alertes 
+            WHERE user_id = ? AND crypto_id = ? AND seuil = ? AND alert_type= ?
+        """, (user_id, crypto_id, seuil,alert_type))
+
         if cursor.fetchone() is None:
-            print(f"Aucune alerte trouvée pour {crypto}.")
+            print(f"Aucune alerte trouvée pour {crypto} au seuil {seuil} et type {alert_type}.")
             return
 
         # Supprimer l'alerte
-        cursor.execute("DELETE FROM Alertes WHERE crypto = ?", (crypto,))
+        cursor.execute("""
+            DELETE FROM Alertes 
+            WHERE user_id = ? AND crypto_id = ? AND seuil = ? AND alert_type= ?
+        """, (user_id, crypto_id, seuil, alert_type))
+
         connection.commit()
-        print(f"Alerte supprimée pour {crypto}.")
+        print(f"Alerte supprimée pour {crypto} au seuil {seuil} et type {alert_type}")
 
     except sqlite3.Error as e:
         print(f"Erreur lors de la suppression de l'alerte : {e}")
-    
+
     finally:
         connection.close()
 
-import sqlite3
 
-def get_monnaies_avec_alertes():
-    """ Récupérer tous les résultats sous forme de tuples (cryptomonnaie, prix, seuil)"""
+def collect_alerts(user_id):
+    """
+    Récupère toutes les Cryptocurrency ayant des alertes pour un utilisateur donné.
+    Retourne une liste de tuples (cryptomonnaie, price, seuil, alert_type).
+    """
     try:
         connection = sqlite3.connect("crypto_app.db")
         cursor = connection.cursor()
-        
+
         cursor.execute("""
-            SELECT Cryptomonnaies.cryptomonnaie, Cryptomonnaies.prix, Alertes.seuil 
-            FROM Alertes 
-            JOIN Cryptomonnaies ON Alertes.crypto_id = Cryptomonnaies.id
-        """)
-  
+            SELECT Cryptocurrency.cryptomonnaie, Cryptocurrency.price, Alertes.seuil, Alertes.alert_type
+            FROM Alertes
+            JOIN Cryptocurrency ON Alertes.crypto_id = Cryptocurrency.id
+            WHERE Alertes.user_id = ?;
+        """, (user_id,))
+
         resultats = cursor.fetchall()
-        
-        print("Liste des monnaies avec prix et alertes:", resultats)
+
+        print(f" Liste des cryptos avec alertes pour l'utilisateur {user_id} : {resultats}")
         return resultats
-        
+
     except sqlite3.Error as e:
-        print(f"Erreur lors de la récupération des alertes: {e}")
+        print(f"  Erreur lors de la récupération des alertes : {e}")
         return []
+
     finally:
         connection.close()
-        
 
-def comparaison_prix_seuil(cryptomonnaie, prix:float, seuil:float):
-    """Compare le prix d'une cryptomonnaie et le seuil défini par l'utilisateur et crée une notification si nécessaire"""
+
+def comparaison_price_seuil(user_id,crypto,seuil,alert_type):
+    """Compare le prix des Cryptocurrency avec leur seuil et affiche une notification si nécessaire"""
+    try:
+        
+        connection = sqlite3.connect("crypto_app.db")
+        
+        cursor = connection.cursor()
+        
+        # get the current price of crypto
+        cursor.execute("SELECT price FROM Cryptocurrency WHERE cryptomonnaie = ?", (crypto,))
+        crypto_price= cursor.fetchone()
+        if not crypto_price:
+            print(f" La cryptomonnaie {crypto} n'existe pas dans la base.")
+            return
+        crypto_price = crypto_price[0]
+        
+        if (crypto_price<seuil and alert_type=="Au-dessous"):
+            print("il faut envoyer notif")
+            return 1
+        if (crypto_price>seuil and alert_type=="Au-dessus"):
+            print("il faut envoyer notif")
+            return 1
+        if (crypto_price==seuil and alert_type=="Égal"):
+            print("il faut envoyer notif")
+            return 1
+        else:
+            print("pas de notif en vue")
+            return 0
+            
+
+    except Exception as e:
+        print(f"Erreur lors de la comparaison des prix et seuils : {e}")
+
+
+
+def update_database(root):
+    update_crypto()
+    #rajouter l'update de l'historique 
+    #lancer en crontab
+
+    
+#/---------------------------/
+#      table Alerte
+#/-----------------------------/
+      
+
+def add_alerte(user_id, crypto, seuil, alert_type):
+    """
+    Ajoute une alerte pour une cryptomonnaie donnée.
+    """
     try:
         connection = sqlite3.connect("crypto_app.db")
         cursor = connection.cursor()
 
-        # Récupérer l'ID de la cryptomonnaie
-        cursor.execute("SELECT id FROM Cryptomonnaies WHERE cryptomonnaie = ?", (cryptomonnaie,))
+        # Obtenir l'ID de la cryptomonnaie
+        cursor.execute("SELECT id FROM Cryptocurrency WHERE cryptomonnaie = ?", (crypto,))
         crypto_id = cursor.fetchone()
+
         if not crypto_id:
-            print(f"Crypto {cryptomonnaie} introuvable.")
-            return
+            print(f"La cryptomonnaie {crypto} n'existe pas dans la base.")
+            return 1
+
         crypto_id = crypto_id[0]
 
-        # Récupérer le dernier statut enregistré
-        cursor.execute("SELECT dernier_statut FROM DernieresNotifications WHERE crypto_id = ?", (crypto_id,))
-        dernier_statut = cursor.fetchone()
-
-        # Déterminer le nouveau statut
-        if prix > seuil:
-            nouveau_statut = "au-dessus"
-            message = f"{cryptomonnaie} est monté au-dessus du seuil : {seuil}"
-        else:
-            nouveau_statut = "en-dessous"
-            message = f"{cryptomonnaie} est passé sous le seuil : {seuil}"
-
-        # Vérifier si le statut a changé
-        if not dernier_statut or dernier_statut[0] != nouveau_statut:
-            add_notification(cryptomonnaie, seuil, message) 
-            
-            # Mettre à jour ou insérer le nouveau statut dans DernieresNotifications
-            cursor.execute("""
-                INSERT INTO DernieresNotifications (crypto_id, dernier_statut, date_notif) 
-                VALUES (?, ?, ?)
-                ON CONFLICT(crypto_id) DO UPDATE SET dernier_statut = excluded.dernier_statut, date_notif = excluded.date_notif
-            """, (crypto_id, nouveau_statut, datetime.now()))
-
-            connection.commit()
-
-    except sqlite3.Error as e:
-        print(f" Erreur lors de la comparaison du prix et du seuil : {e}")
-    
-    finally:
-        connection.close()
-        
-        
-def verifier_alertes(root):
-    """Met à jour les cryptos et vérifie les alertes à intervalle régulier."""
-    update_crypto()
-    cryptos_dans_alertes = get_monnaies_avec_alertes()
-    
-    for (cryptomonnaie, prix, seuil) in cryptos_dans_alertes:
-        comparaison_prix_seuil(cryptomonnaie, float(prix), float(seuil))
-
-    #Relancer la vérification toutes les 60 secondes
-    root.after(60000, lambda: verifier_alertes(root))
-
-    
-# /**********************************/
-
-
-
-#/---------------------------/
-#      table notif
-#/---------------------------/
-
-
-def add_notification(crypto, seuil, changement):
-    try:
-        connection = sqlite3.connect("crypto_app.db")
-        cursor = connection.cursor()
-
-
-        # Ajouter la notification dans la table Notifications
+        # Vérifier si l'alerte existe déjà
         cursor.execute("""
-            INSERT INTO Notifications (crypto_id, seuil, type_alerte) 
-            VALUES ((SELECT id FROM Cryptomonnaies WHERE cryptomonnaie = ?), ?, ?)
-        """, (crypto, seuil, changement))
+            SELECT id FROM Alertes 
+            WHERE user_id = ? AND crypto_id = ? AND seuil = ? AND alert_type = ?
+        """, (user_id, crypto_id, seuil, alert_type))
 
-        # Envoyer la notification (fonction send_notif doit être définie ailleurs)
-        send_notif(f"{crypto} {changement} le seuil de {seuil}€")
+        if cursor.fetchone():
+            print(f"Une alerte pour {crypto} au seuil {seuil} existe déjà.")
+            return 2
+
+        # Ajouter l'alerte
+        cursor.execute("""
+            INSERT INTO Alertes (user_id, crypto_id, seuil, alert_type) 
+            VALUES (?, ?, ?, ?)
+        """, (user_id, crypto_id, seuil, alert_type))
 
         connection.commit()
-        print(f" Notification ajoutée : {crypto} a {changement} le seuil de {seuil}.")
+        print(f"Alerte ajoutée pour {crypto} au seuil {seuil}.")
+        return 0
 
     except sqlite3.Error as e:
-        print(f" Erreur lors de l'ajout de la notification : {e}")
+        print(f"Erreur lors de l'ajout de l'alerte : {e}")
+        return 3
 
     finally:
         connection.close()
 
 
-
-def delete_notification(crypto):
+def delete_alerte(user_id, crypto, seuil,alert_type):
+    """
+    Supprime une alerte spécifique d'un utilisateur pour une cryptomonnaie donnée.
+    """
     try:
         connection = sqlite3.connect("crypto_app.db")
         cursor = connection.cursor()
 
-        # Vérifier si la notification existe
-        cursor.execute("SELECT id FROM Notifications WHERE crypto = ?", (crypto,))
-        if cursor.fetchone() is None:
-            print(f"Aucune notification trouvée pour {crypto}.")
+        # Obtenir l'ID de la cryptomonnaie
+        cursor.execute("SELECT id FROM Cryptocurrency WHERE cryptomonnaie = ?", (crypto,))
+        crypto_id = cursor.fetchone()
+
+        if not crypto_id:
+            print(f" La cryptomonnaie {crypto} n'existe pas dans la base.")
             return
 
-        # Supprimer la notification
-        cursor.execute("DELETE FROM Notifications WHERE crypto = ?", (crypto,))
+        crypto_id = crypto_id[0]
+
+        # Vérifier si l'alerte existe
+        cursor.execute("""
+            SELECT id FROM Alertes 
+            WHERE user_id = ? AND crypto_id = ? AND seuil = ? AND alert_type= ?
+        """, (user_id, crypto_id, seuil,alert_type))
+
+        if cursor.fetchone() is None:
+            print(f"Aucune alerte trouvée pour {crypto} au seuil {seuil} et type {alert_type}.")
+            return
+
+        # Supprimer l'alerte
+        cursor.execute("""
+            DELETE FROM Alertes 
+            WHERE user_id = ? AND crypto_id = ? AND seuil = ? AND alert_type= ?
+        """, (user_id, crypto_id, seuil, alert_type))
+
         connection.commit()
-        print(f"Notification supprimée pour {crypto}.")
+        print(f"Alerte supprimée pour {crypto} au seuil {seuil} et type {alert_type}")
 
     except sqlite3.Error as e:
-        print(f" Erreur lors de la suppression de la notification : {e}")
-    
+        print(f"Erreur lors de la suppression de l'alerte : {e}")
+
     finally:
         connection.close()
-        
 
-def get_historique_notifications():
-    """Récupère l'historique des dernières notifications envoyées."""
+
+def collect_alerts(user_id):
+    """
+    Récupère toutes les Cryptocurrency ayant des alertes pour un utilisateur donné.
+    Retourne une liste de tuples (cryptomonnaie, price, seuil, alert_type).
+    """
     try:
         connection = sqlite3.connect("crypto_app.db")
         cursor = connection.cursor()
 
         cursor.execute("""
-            SELECT Cryptomonnaies.cryptomonnaie, DernieresNotifications.dernier_statut, DernieresNotifications.date_notif
-            FROM DernieresNotifications
-            JOIN Cryptomonnaies ON DernieresNotifications.crypto_id = Cryptomonnaies.id
-            ORDER BY DernieresNotifications.date_notif DESC
-        """)
-        
-        notifications = cursor.fetchall()
-        
-        print("Historique des dernières notifications :")
-        for crypto, statut, date in notifications:
-            print(f"- {crypto} : {statut} (Envoyé le {date})")
+            SELECT Cryptocurrency.cryptomonnaie, Cryptocurrency.price, Alertes.seuil, Alertes.alert_type
+            FROM Alertes
+            JOIN Cryptocurrency ON Alertes.crypto_id = Cryptocurrency.id
+            WHERE Alertes.user_id = ?;
+        """, (user_id,))
 
-        return notifications
+        resultats = cursor.fetchall()
+
+        print(f" Liste des cryptos avec alertes pour l'utilisateur {user_id} : {resultats}")
+        return resultats
 
     except sqlite3.Error as e:
-        print(f"Erreur lors de la récupération des notifications : {e}")
+        print(f"  Erreur lors de la récupération des alertes : {e}")
         return []
-    
+
     finally:
         connection.close()
-        
-def send_notif(crypto,changement,seuil):
-    return 
 
+
+def comparaison_price_seuil(user_id,crypto,seuil,alert_type):
+    """Compare le prix des Cryptocurrency avec leur seuil et affiche une notification si nécessaire"""
+    try:
+        
+        connection = sqlite3.connect("crypto_app.db")
+        
+        cursor = connection.cursor()
+        
+        # get the current price of crypto
+        cursor.execute("SELECT price FROM Cryptocurrency WHERE cryptomonnaie = ?", (crypto,))
+        crypto_price= cursor.fetchone()
+        if not crypto_price:
+            print(f" La cryptomonnaie {crypto} n'existe pas dans la base.")
+            return
+        crypto_price = crypto_price[0]
+        
+        if (crypto_price<seuil and alert_type=="Au-dessous"):
+            print("il faut envoyer notif")
+            return 1
+        if (crypto_price>seuil and alert_type=="Au-dessus"):
+            print("il faut envoyer notif")
+            return 1
+        if (crypto_price==seuil and alert_type=="Égal"):
+            print("il faut envoyer notif")
+            return 1
+        else:
+            print("pas de notif en vue")
+            return 0
+            
+
+    except Exception as e:
+        print(f"Erreur lors de la comparaison des prix et seuils : {e}")
+
+
+
+def update_database(root):
+    update_crypto()
+    #rajouter l'update de l'historique 
+    #lancer en crontab
 
 
         
